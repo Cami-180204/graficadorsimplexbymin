@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<title>Graficador de Desigualdades + Simplex</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mathjs/11.11.1/math.min.js"></script>
+<style>
+  body {
+    background:#f5f0db;
+    padding:20px;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    gap:14px;
+    font-family:'Cambria Math',serif;
+  }
+  h1{font-size:22px;font-weight:bold}
+  canvas{background:#fff;border:1px solid #000;border-radius:8px}
+  .btn{background:#4b5563;color:#000;font-weight:600;border-radius:6px;padding:6px 12px;cursor:pointer}
+  .btn.small{padding:4px 8px;font-size:14px}
+  .mv{width:34px;height:34px;display:flex;align-items:center;justify-content:center;background:#ff5783;color:#000}
+  #zin,#zout{background:#D7a1f9;color:#000}
+  #add{background:#A2E4B8}
+  #draw{background:#75c6f7}
+  #simplex{background:#a0e9ff}
+  #result,#interpret{
+    margin-top:10px;
+    font-size:16px;
+    background:#e5e7eb;
+    padding:6px 10px;
+    border-radius:6px;
+    min-width:280px;
+    max-width:900px;
+    white-space:pre-wrap;
+  }
+  #interpret{background:#fff8dc}
+</style>
+</head>
+<body>
+  <h1>Graficador / Solver Simplex con Interpretación</h1>
+  <div id="inputWrap" style="display:grid;grid-template-columns:repeat(2,1fr);gap:12px;width:600px"></div>
+  <button id="add" class="btn">+ añadir desigualdad</button>
+  <div style="display:flex;gap:8px;align-items:center">
+    <label> Z = </label>
+    <input id="obj" style="padding:6px;border:1px solid #ccc;border-radius:4px;width:220px" placeholder="3*x+2*y">
+    <select id="sense" style="padding:6px;border:1px solid #ccc;border-radius:4px">
+      <option value="max">Maximizar</option>
+      <option value="min">Minimizar</option>
+    </select>
+  </div>
+  <div style="display:flex;gap:12px;align-items:center">
+    <button id="draw" class="btn">Graficar región</button>
+    <button id="simplex" class="btn">Resolver (método simplex)</button>
+    <button id="zin" class="btn small">+</button>
+    <button id="zout" class="btn small">−</button>
+    <div style="display:flex;gap:6px">
+      <button class="btn mv" data-d="left">←</button>
+      <button class="btn mv" data-d="right">→</button>
+      <button class="btn mv" data-d="up">↑</button>
+      <button class="btn mv" data-d="down">↓</button>
+      <button class="btn mv" data-d="re">⌖</button>
+    </div>
+  </div>
+  <canvas id="cv" width="1000" height="700"></canvas>
+  <div id="result">Introduce las desigualdades, la función Z y haz clic en “Graficar región” o “Resolver (método simplex)”.</div>
+  <div id="interpret"></div>
+<script>
+/* ---------- utilidades visuales ---------- */
+const tpl=()=>`<input class="ineq" style="padding:6px;border-radius:4px;border:1px solid #ccc" placeholder="4*x+2*y<=100">`;
+const wrap=document.getElementById('inputWrap');for(let i=0;i<4;i++)wrap.insertAdjacentHTML('beforeend',tpl());
+document.getElementById('add').onclick=()=>wrap.insertAdjacentHTML('beforeend',tpl());
+const cv=document.getElementById('cv');const ctx=cv.getContext('2d');let scale=5,off={x:cv.width/2,y:cv.height/2};
+function getPal(){return["#EF4444","#10B981","#8B5CF6","#3B82F6"];}let pal=getPal();
+const tp=(x,y)=>({x:off.x+x*scale,y:off.y-y*scale});const tc=(px,py)=>({x:(px-off.x)/scale,y:(off.y-py)/scale});
+/* ---------- parseo de desigualdades ---------- */
+function parse(str){str=str.replace(/\s+/g,'');const ops=['<=','>=','<','>','='];const op=ops.find(o=>str.includes(o));if(!op)throw 'Falta operador en "'+str+'"';const[L,R]=str.split(op);const ex=`(${math.parse(L)})-(${math.parse(R)})`;const f=Function('x','y',`return ${ex}`);const c=f(0,0),a=f(1,0)-c,b=f(0,1)-c;const test=(x,y)=>{const v=f(x,y);switch(op){case'<=':return v<=1e-9;case'<':return v<0;case'>=':return v>=-1e-9;case'>':return v>0;default:return Math.abs(v)<1e-9;}};return{raw:str,op,a,b,c,color:pal.shift()||'#000',test};}
+/* ---------- dibujo de ejes y grilla ---------- */
+function grid(){ctx.clearRect(0,0,cv.width,cv.height);ctx.lineWidth=1;ctx.strokeStyle='#e5e7eb';for(let x=off.x%scale;x<cv.width;x+=scale){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,cv.height);ctx.stroke();}for(let y=off.y%scale;y<cv.height;y+=scale){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(cv.width,y);ctx.stroke();}ctx.strokeStyle='#000';ctx.beginPath();ctx.moveTo(0,off.y);ctx.lineTo(cv.width,off.y);ctx.moveTo(off.x,0);ctx.lineTo(off.x,cv.height);ctx.stroke();ctx.font="10px 'Courier New'";ctx.fillStyle='#000';const stepLbl=Math.max(1,Math.ceil(50/scale));for(let i=-cv.width/scale;i<cv.width/scale;i++){if(i%stepLbl)continue;const p=tp(i,0);if(p.x>0&&p.x<cv.width)ctx.fillText(i,p.x+2,off.y+12);}for(let j=-cv.height/scale;j<cv.height/scale;j++){if(j%stepLbl)continue;const p=tp(0,j);if(p.y>0&&p.y<cv.height)ctx.fillText(j,p.x+4,p.y-4);}}
+/* ---------- sombrear región factible ---------- */
+function shade(arr){const img=ctx.getImageData(0,0,cv.width,cv.height);const d=img.data,step=6;for(let px=0;px<cv.width;px+=step)for(let py=0;py<cv.height;py+=step){const {x,y}=tc(px,py);if(arr.every(o=>o.test(x,y))){for(let dx=0;dx<step;dx++)for(let dy=0;dy<step;dy++){const id=((py+dy)*cv.width+px+dx)*4;d[id]=255;d[id+1]=255;d[id+2]=180;d[id+3]=70;}}}ctx.putImageData(img,0,0);}
+/* ---------- dibujar fronteras ---------- */
+function border(arr){arr.forEach(o=>{ctx.strokeStyle=o.color;ctx.lineWidth=2;ctx.beginPath();if(Math.abs(o.b)<1e-9){const xConst=(-o.c)/o.a;const px=tp(xConst,0).x;ctx.moveTo(px,0);ctx.lineTo(px,cv.height);}else if(Math.abs(o.a)<1e-9){const yConst=(-o.c)/o.b;const py=tp(0,yConst).y;ctx.moveTo(0,py);ctx.lineTo(cv.width,py);}else{let first=true;for(let px=0;px<cv.width;px++){const x=tc(px,0).x;const y=(-o.a*x-o.c)/o.b;const py=tp(0,y).y;if(py<0||py>cv.height)continue;if(first){ctx.moveTo(px,py);first=false;}else ctx.lineTo(px,py);} }ctx.stroke();ctx.fillStyle=o.color;ctx.font='12px Arial';ctx.fillText(o.raw,10+Math.random()*40,15+Math.random()*20);});}
+/* ---------- vértices ---------- */
+function getVertices(arr){const pts=[];for(let i=0;i<arr.length;i++)for(let j=i+1;j<arr.length;j++){const d=arr[i].a*arr[j].b-arr[j].a*arr[i].b;if(Math.abs(d)<1e-9)continue;const x=(arr[i].b*arr[j].c-arr[j].b*arr[i].c)/d;const y=(arr[i].c*arr[j].a-arr[j].c*arr[i].a)/d;if(arr.every(o=>o.test(x,y)))pts.push({x:+x.toFixed(4),y:+y.toFixed(4)});}return pts;}
+function drawVertices(pts){pts.forEach(p=>{const pix=tp(p.x,p.y);ctx.beginPath();ctx.arc(pix.x,pix.y,5,0,Math.PI*2);ctx.fillStyle='#ff7e79';ctx.fill();ctx.strokeStyle='#000';ctx.stroke();ctx.font='12px Arial';ctx.fillStyle='#000';ctx.fillText(`(${p.x},${p.y})`,pix.x+6,pix.y-6);});}
+/* ---------- objetivo ---------- */
+function evaluateObjective(pts){const objStr=document.getElementById('obj').value.trim();if(!objStr)return null;let f;try{f=Function('x','y',`return ${objStr}`);}catch{alert('Error en función Z');return null;}const sense=document.getElementById('sense').value;let best=pts[0];let bestVal=f(best.x,best.y);pts.forEach(p=>{const v=f(p.x,p.y);if((sense==='max'&&v>bestVal)||(sense==='min'&&v<bestVal)){best=p;bestVal=v;}});return{best,bestVal,fStr:objStr,sense};}
+function highlightBest(best){const pix=tp(best.x,best.y);ctx.beginPath();ctx.arc(pix.x,pix.y,7,0,Math.PI*2);ctx.strokeStyle='#dc2626';ctx.lineWidth=3;ctx.stroke();}
+/* ---------- interpretación ---------- */
+function buildInterpretation(info,constraints){if(!info)return'';let txt=`🔎 Interpretación de resultados\n`;
+  txt+=`La solución óptima ${(info.sense==='max')?'maximiza':'minimiza'} Z = ${info.fStr}.\n`;
+  txt+=`• Valor de x: ${info.best.x}\n`;
+  txt+=`• Valor de y: ${info.best.y}\n`;
+  txt+=`• Valor óptimo de Z: ${info.bestVal}\n\n`;
+  txt+='Verificación de restricciones:\n';
+  constraints.forEach(c=>{const sat=c.test(info.best.x,info.best.y);txt+=`   ${c.raw} → ${(sat?'✔':'✖')}\n`;});
+  txt+='\nConclusión: Con estos valores, se cumple(n) todas las restricciones y se obtiene el valor óptimo indicado.';
+  return txt;}
+/* ---------- plot ---------- */
+function plot(){try{pal=getPal();const arr=[...document.querySelectorAll('.ineq')].map(e=>e.value.trim()).filter(Boolean).map(parse);if(arr.length<2)throw'Escribe al menos 2 desigualdades.';grid();shade(arr);border(arr);const vertices=getVertices(arr);if(vertices.length===0)throw'No existe intersección factible.';drawVertices(vertices);const info=evaluateObjective(vertices);if(info){highlightBest(info.best);document.getElementById('result').textContent=`${info.sense==='max'?'Máximo':'Mínimo'} Z=${info.fStr} en (${info.best.x},${info.best.y}) → Z=${info.bestVal}`;document.getElementById('interpret').textContent=buildInterpretation(info,arr);}else{document.getElementById('result').textContent='Introduce Z y vuelve a graficar.';document.getElementById('interpret').textContent='';}}
+  catch(e){alert(e);}}
+/* ---------- "Simplex" (resuelve mediante vértices y muestra pasos simplificados) ---------- */
+function simplexSolve(){try{
+  pal=getPal();const arr=[...document.querySelectorAll('.ineq')].map(e=>e.value.trim()).filter(Boolean).map(parse);if(arr.length<2)throw'Escribe al menos 2 desigualdades.';
+  const vertices=getVertices(arr);if(vertices.length===0)throw'No existe intersección factible.';
+  const info=evaluateObjective(vertices);
+  let pasos='📐 MÉTODO SIMPLEX (versión simplificada mediante vértices)\n';
+  pasos+='Se enumeran los vértices de la región factible y se evalúa la función objetivo en cada uno:\n';
+  vertices.forEach(v=>{pasos+=`  (${v.x},${v.y}) ⇒ Z=${Function('x','y',`return ${info.fStr}`)(v.x,v.y)}\n`;});
+  pasos+=`\nResultado óptimo: (${info.best.x}, ${info.best.y}) con Z=${info.bestVal}.\n`;
+  document.getElementById('result').textContent='Resultado método simplex mostrado abajo 👇';
+  document.getElementById('interpret').textContent=pasos+"\n"+buildInterpretation(info,arr);
+  grid();border(arr);drawVertices(vertices);highlightBest(info.best);
+}catch(e){alert(e);} }
+
+/* ---------- eventos ---------- */
+document.getElementById('draw').onclick=plot;document.getElementById('simplex').onclick=simplexSolve;
+document.getElementById('zin').onclick=()=>{scale=Math.min(scale+10,200);plot();};
+document.getElementById('zout').onclick=()=>{scale=Math.max(scale-10,1);plot();};
+document.querySelectorAll('[data-d]').forEach(b=>b.onclick=()=>{const s=20;switch(b.dataset.d){case'up':off.y+=s;break;case'down':off.y-=s;break;case'left':off.x+=s;break;case'right':off.x-=s;break;default:off={x:cv.width/2,y:cv.height/2};}plot();});
+/* ---------- primera vista ---------- */
+plot();
+</script>
+</body>
+</html>
