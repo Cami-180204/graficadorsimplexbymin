@@ -1,11 +1,16 @@
 <!DOCTYPE html>
-<html lang="es">
+<html lang='es'>
 <head>
-<meta charset="UTF-8" />
-<title>Graficador de Desigualdades + Simplex</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/mathjs/11.11.1/math.min.js"></script>
+<meta charset='UTF-8' />
+<title>Graficador de Desigualdades + Simplex (con pasos Gauss‑Jordan)</title>
+<script src='https://cdnjs.cloudflare.com/ajax/libs/mathjs/11.11.1/math.min.js'></script>
+
+<!-- =========================================================
+     ESTILOS  –  se mantienen los existentes + ajustes mínimos
+========================================================= -->
 <style>
-  body {
+  /* —— Layout general —— */
+  body{
     background:#f5f0db;
     padding:20px;
     display:flex;
@@ -14,111 +19,499 @@
     gap:14px;
     font-family:'Cambria Math',serif;
   }
-  h1{font-size:22px;font-weight:bold}
-  canvas{background:#fff;border:1px solid #000;border-radius:8px}
-  .btn{background:#4b5563;color:#000;font-weight:600;border-radius:6px;padding:6px 12px;cursor:pointer}
-  .btn.small{padding:4px 8px;font-size:14px}
-  .mv{width:34px;height:34px;display:flex;align-items:center;justify-content:center;background:#ff5783;color:#000}
-  #zin,#zout{background:#D7a1f9;color:#000}
-  #add{background:#A2E4B8}
-  #draw{background:#75c6f7}
-  #simplex{background:#a0e9ff}
-  #result,#interpret{
+  h1{font:700 20px 'Cambria Math',serif;margin:0;}
+
+  /* —— Canvas —— */
+  canvas{
+    background:#fff;
+    border:1px solid #000;
+    border-radius:8px;
+  }
+
+  /* —— Botones —— */
+  .btn{
+    background:#4b5563;
+    color:#000;
+    font-weight:600;
+    border-radius:6px;
+    padding:6px 12px;
+    cursor:pointer;
+  }
+  .mv{width:34px;height:34px;display:flex;align-items:center;justify-content:center;background:#ff5783;color:#000;}
+  #zin,#zout{background:#d7a1f9}
+  #add       {background:#a2e4b8}
+  #draw      {background:#75c6f7}
+  #solve     {background:#fde047;color:#000}
+  #steps     {background:#fb923c;color:#000}
+
+  /* —— Cajas de salida —— */
+  #result,#vertexEval,#summary,#analysis,#stepsOut{
     margin-top:10px;
     font-size:16px;
     background:#e5e7eb;
     padding:6px 10px;
     border-radius:6px;
-    min-width:280px;
+    min-width:260px;
     max-width:900px;
     white-space:pre-wrap;
   }
-  #interpret{background:#fff8dc}
+  #vertexEval{background:#dbeafe;}
+  #summary   {background:#e0f2f1;}
+  #analysis  {font-size:14px;line-height:1.35em;}
+  #stepsOut  {background:#fff7ed;overflow-x:auto;}
+
+  /* —— Tabla Simplex —— */
+  table.simplex{border-collapse:collapse;width:100%;margin-top:12px;font-size:14px}
+  table.simplex th,table.simplex td{border:1px solid #000;padding:6px 12px;text-align:center}
+  table.simplex th{background:#fcd34d;font-weight:700}
+  .step-label{font-weight:700;margin-top:8px}
 </style>
 </head>
 <body>
-  <h1>Graficador / Solver Simplex con Interpretación</h1>
-  <div id="inputWrap" style="display:grid;grid-template-columns:repeat(2,1fr);gap:12px;width:600px"></div>
-  <button id="add" class="btn">+ añadir desigualdad</button>
-  <div style="display:flex;gap:8px;align-items:center">
-    <label> Z = </label>
-    <input id="obj" style="padding:6px;border:1px solid #ccc;border-radius:4px;width:220px" placeholder="3*x+2*y">
-    <select id="sense" style="padding:6px;border:1px solid #ccc;border-radius:4px">
-      <option value="max">Maximizar</option>
-      <option value="min">Minimizar</option>
-    </select>
-  </div>
-  <div style="display:flex;gap:12px;align-items:center">
-    <button id="draw" class="btn">Graficar región</button>
-    <button id="simplex" class="btn">Resolver (método simplex)</button>
-    <button id="zin" class="btn small">+</button>
-    <button id="zout" class="btn small">−</button>
-    <div style="display:flex;gap:6px">
-      <button class="btn mv" data-d="left">←</button>
-      <button class="btn mv" data-d="right">→</button>
-      <button class="btn mv" data-d="up">↑</button>
-      <button class="btn mv" data-d="down">↓</button>
-      <button class="btn mv" data-d="re">⌖</button>
-    </div>
-  </div>
-  <canvas id="cv" width="1000" height="700"></canvas>
-  <div id="result">Introduce las desigualdades, la función Z y haz clic en “Graficar región” o “Resolver (método simplex)”.</div>
-  <div id="interpret"></div>
-<script>
-/* ---------- utilidades visuales ---------- */
-const tpl=()=>`<input class="ineq" style="padding:6px;border-radius:4px;border:1px solid #ccc" placeholder="4*x+2*y<=100">`;
-const wrap=document.getElementById('inputWrap');for(let i=0;i<4;i++)wrap.insertAdjacentHTML('beforeend',tpl());
-document.getElementById('add').onclick=()=>wrap.insertAdjacentHTML('beforeend',tpl());
-const cv=document.getElementById('cv');const ctx=cv.getContext('2d');let scale=5,off={x:cv.width/2,y:cv.height/2};
-function getPal(){return["#EF4444","#10B981","#8B5CF6","#3B82F6"];}let pal=getPal();
-const tp=(x,y)=>({x:off.x+x*scale,y:off.y-y*scale});const tc=(px,py)=>({x:(px-off.x)/scale,y:(off.y-py)/scale});
-/* ---------- parseo de desigualdades ---------- */
-function parse(str){str=str.replace(/\s+/g,'');const ops=['<=','>=','<','>','='];const op=ops.find(o=>str.includes(o));if(!op)throw 'Falta operador en "'+str+'"';const[L,R]=str.split(op);const ex=`(${math.parse(L)})-(${math.parse(R)})`;const f=Function('x','y',`return ${ex}`);const c=f(0,0),a=f(1,0)-c,b=f(0,1)-c;const test=(x,y)=>{const v=f(x,y);switch(op){case'<=':return v<=1e-9;case'<':return v<0;case'>=':return v>=-1e-9;case'>':return v>0;default:return Math.abs(v)<1e-9;}};return{raw:str,op,a,b,c,color:pal.shift()||'#000',test};}
-/* ---------- dibujo de ejes y grilla ---------- */
-function grid(){ctx.clearRect(0,0,cv.width,cv.height);ctx.lineWidth=1;ctx.strokeStyle='#e5e7eb';for(let x=off.x%scale;x<cv.width;x+=scale){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,cv.height);ctx.stroke();}for(let y=off.y%scale;y<cv.height;y+=scale){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(cv.width,y);ctx.stroke();}ctx.strokeStyle='#000';ctx.beginPath();ctx.moveTo(0,off.y);ctx.lineTo(cv.width,off.y);ctx.moveTo(off.x,0);ctx.lineTo(off.x,cv.height);ctx.stroke();ctx.font="10px 'Courier New'";ctx.fillStyle='#000';const stepLbl=Math.max(1,Math.ceil(50/scale));for(let i=-cv.width/scale;i<cv.width/scale;i++){if(i%stepLbl)continue;const p=tp(i,0);if(p.x>0&&p.x<cv.width)ctx.fillText(i,p.x+2,off.y+12);}for(let j=-cv.height/scale;j<cv.height/scale;j++){if(j%stepLbl)continue;const p=tp(0,j);if(p.y>0&&p.y<cv.height)ctx.fillText(j,p.x+4,p.y-4);}}
-/* ---------- sombrear región factible ---------- */
-function shade(arr){const img=ctx.getImageData(0,0,cv.width,cv.height);const d=img.data,step=6;for(let px=0;px<cv.width;px+=step)for(let py=0;py<cv.height;py+=step){const {x,y}=tc(px,py);if(arr.every(o=>o.test(x,y))){for(let dx=0;dx<step;dx++)for(let dy=0;dy<step;dy++){const id=((py+dy)*cv.width+px+dx)*4;d[id]=255;d[id+1]=255;d[id+2]=180;d[id+3]=70;}}}ctx.putImageData(img,0,0);}
-/* ---------- dibujar fronteras ---------- */
-function border(arr){arr.forEach(o=>{ctx.strokeStyle=o.color;ctx.lineWidth=2;ctx.beginPath();if(Math.abs(o.b)<1e-9){const xConst=(-o.c)/o.a;const px=tp(xConst,0).x;ctx.moveTo(px,0);ctx.lineTo(px,cv.height);}else if(Math.abs(o.a)<1e-9){const yConst=(-o.c)/o.b;const py=tp(0,yConst).y;ctx.moveTo(0,py);ctx.lineTo(cv.width,py);}else{let first=true;for(let px=0;px<cv.width;px++){const x=tc(px,0).x;const y=(-o.a*x-o.c)/o.b;const py=tp(0,y).y;if(py<0||py>cv.height)continue;if(first){ctx.moveTo(px,py);first=false;}else ctx.lineTo(px,py);} }ctx.stroke();ctx.fillStyle=o.color;ctx.font='12px Arial';ctx.fillText(o.raw,10+Math.random()*40,15+Math.random()*20);});}
-/* ---------- vértices ---------- */
-function getVertices(arr){const pts=[];for(let i=0;i<arr.length;i++)for(let j=i+1;j<arr.length;j++){const d=arr[i].a*arr[j].b-arr[j].a*arr[i].b;if(Math.abs(d)<1e-9)continue;const x=(arr[i].b*arr[j].c-arr[j].b*arr[i].c)/d;const y=(arr[i].c*arr[j].a-arr[j].c*arr[i].a)/d;if(arr.every(o=>o.test(x,y)))pts.push({x:+x.toFixed(4),y:+y.toFixed(4)});}return pts;}
-function drawVertices(pts){pts.forEach(p=>{const pix=tp(p.x,p.y);ctx.beginPath();ctx.arc(pix.x,pix.y,5,0,Math.PI*2);ctx.fillStyle='#ff7e79';ctx.fill();ctx.strokeStyle='#000';ctx.stroke();ctx.font='12px Arial';ctx.fillStyle='#000';ctx.fillText(`(${p.x},${p.y})`,pix.x+6,pix.y-6);});}
-/* ---------- objetivo ---------- */
-function evaluateObjective(pts){const objStr=document.getElementById('obj').value.trim();if(!objStr)return null;let f;try{f=Function('x','y',`return ${objStr}`);}catch{alert('Error en función Z');return null;}const sense=document.getElementById('sense').value;let best=pts[0];let bestVal=f(best.x,best.y);pts.forEach(p=>{const v=f(p.x,p.y);if((sense==='max'&&v>bestVal)||(sense==='min'&&v<bestVal)){best=p;bestVal=v;}});return{best,bestVal,fStr:objStr,sense};}
-function highlightBest(best){const pix=tp(best.x,best.y);ctx.beginPath();ctx.arc(pix.x,pix.y,7,0,Math.PI*2);ctx.strokeStyle='#dc2626';ctx.lineWidth=3;ctx.stroke();}
-/* ---------- interpretación ---------- */
-function buildInterpretation(info,constraints){if(!info)return'';let txt=`🔎 Interpretación de resultados\n`;
-  txt+=`La solución óptima ${(info.sense==='max')?'maximiza':'minimiza'} Z = ${info.fStr}.\n`;
-  txt+=`• Valor de x: ${info.best.x}\n`;
-  txt+=`• Valor de y: ${info.best.y}\n`;
-  txt+=`• Valor óptimo de Z: ${info.bestVal}\n\n`;
-  txt+='Verificación de restricciones:\n';
-  constraints.forEach(c=>{const sat=c.test(info.best.x,info.best.y);txt+=`   ${c.raw} → ${(sat?'✔':'✖')}\n`;});
-  txt+='\nConclusión: Con estos valores, se cumple(n) todas las restricciones y se obtiene el valor óptimo indicado.';
-  return txt;}
-/* ---------- plot ---------- */
-function plot(){try{pal=getPal();const arr=[...document.querySelectorAll('.ineq')].map(e=>e.value.trim()).filter(Boolean).map(parse);if(arr.length<2)throw'Escribe al menos 2 desigualdades.';grid();shade(arr);border(arr);const vertices=getVertices(arr);if(vertices.length===0)throw'No existe intersección factible.';drawVertices(vertices);const info=evaluateObjective(vertices);if(info){highlightBest(info.best);document.getElementById('result').textContent=`${info.sense==='max'?'Máximo':'Mínimo'} Z=${info.fStr} en (${info.best.x},${info.best.y}) → Z=${info.bestVal}`;document.getElementById('interpret').textContent=buildInterpretation(info,arr);}else{document.getElementById('result').textContent='Introduce Z y vuelve a graficar.';document.getElementById('interpret').textContent='';}}
-  catch(e){alert(e);}}
-/* ---------- "Simplex" (resuelve mediante vértices y muestra pasos simplificados) ---------- */
-function simplexSolve(){try{
-  pal=getPal();const arr=[...document.querySelectorAll('.ineq')].map(e=>e.value.trim()).filter(Boolean).map(parse);if(arr.length<2)throw'Escribe al menos 2 desigualdades.';
-  const vertices=getVertices(arr);if(vertices.length===0)throw'No existe intersección factible.';
-  const info=evaluateObjective(vertices);
-  let pasos='📐 MÉTODO SIMPLEX (versión simplificada mediante vértices)\n';
-  pasos+='Se enumeran los vértices de la región factible y se evalúa la función objetivo en cada uno:\n';
-  vertices.forEach(v=>{pasos+=`  (${v.x},${v.y}) ⇒ Z=${Function('x','y',`return ${info.fStr}`)(v.x,v.y)}\n`;});
-  pasos+=`\nResultado óptimo: (${info.best.x}, ${info.best.y}) con Z=${info.bestVal}.\n`;
-  document.getElementById('result').textContent='Resultado método simplex mostrado abajo 👇';
-  document.getElementById('interpret').textContent=pasos+"\n"+buildInterpretation(info,arr);
-  grid();border(arr);drawVertices(vertices);highlightBest(info.best);
-}catch(e){alert(e);} }
+<h1>Graficador de Desigualdades & Método Simplex</h1>
 
-/* ---------- eventos ---------- */
-document.getElementById('draw').onclick=plot;document.getElementById('simplex').onclick=simplexSolve;
-document.getElementById('zin').onclick=()=>{scale=Math.min(scale+10,200);plot();};
+<!-- ========= Campos de entrada ========= -->
+<div id='inputWrap' style='display:grid;grid-template-columns:repeat(2,1fr);gap:12px;width:600px'></div>
+<button id='add' class='btn'>+ añadir desigualdad</button>
+
+<!-- —— Función objetivo —— -->
+<div style='display:flex;gap:8px;align-items:center'>
+  <label>Z =</label>
+  <input id='obj' style='padding:6px;border:1px solid #ccc;border-radius:4px;width:220px' placeholder='3*x+2*y'>
+  <select id='sense' style='padding:6px;border:1px solid #ccc;border-radius:4px'>
+    <option value='max'>Maximizar</option>
+    <option value='min'>Minimizar</option>
+  </select>
+</div>
+
+<!-- —— Botones principales —— -->
+<div style='display:flex;gap:12px;align-items:center;flex-wrap:wrap'>
+  <button id='draw'  class='btn'>Graficar región</button>
+  <button id='solve' class='btn'>Resolver Simplex</button>
+  <button id='steps' class='btn'>Pasos Simplex</button>
+  <button id='zin'   class='btn'>+</button>
+  <button id='zout'  class='btn'>−</button>
+  <div style='display:flex;gap:6px'>
+    <button class='btn mv' data-d='left'>←</button>
+    <button class='btn mv' data-d='right'>→</button>
+    <button class='btn mv' data-d='up'>↑</button>
+    <button class='btn mv' data-d='down'>↓</button>
+    <button class='btn mv' data-d='re'>⌖</button>
+  </div>
+</div>
+
+<!-- ========= Canvas & Resultados ========= -->
+<canvas id='cv' width='1000' height='700'></canvas>
+<div id='result'>Introduce Z y haz clic en «Graficar región», «Resolver Simplex» o «Pasos Simplex».</div>
+<div id='vertexEval'></div>
+<div id='summary'></div>
+<div id='analysis'></div>
+<div id='stepsOut'></div>
+
+<!-- =========================================================
+     SCRIPT COMPLETO – Graficador + Simplex + Pasos
+========================================================= -->
+<script>
+/***************************************************
+ *  UTILIDADES Y VARIABLES GLOBALES PARA EL GRÁFICO
+ ***************************************************/
+const tpl = () => `<input class='ineq' style='padding:6px;border-radius:4px;border:1px solid #ccc' placeholder='4*x+2*y<=100'>`;
+const wrap = document.getElementById('inputWrap');
+for(let i=0;i<4;i++) wrap.insertAdjacentHTML('beforeend',tpl());
+document.getElementById('add').onclick = () => wrap.insertAdjacentHTML('beforeend',tpl());
+
+const cv  = document.getElementById('cv');
+const ctx = cv.getContext('2d');
+let scale = 5, off = {x:cv.width/2, y:cv.height/2};
+
+const palette = () => ["#EF4444","#10B981","#8B5CF6","#3B82F6","#fca5a5","#14b8a6"];
+let pal = palette();
+
+/***************************************************
+ *  TRANSFORMACIONES DE COORDENADAS
+ ***************************************************/
+const tp = (x,y)=>({x:off.x + x*scale, y:off.y - y*scale});    // teoría → píxel
+const tc = (px,py)=>({x:(px-off.x)/scale, y:(off.y-py)/scale}); // píxel  → teoría
+
+/***************************************************
+ *  PARSEAR UNA DESIGUALDAD
+ ***************************************************/
+function parse(str){
+  str = str.replace(/\s+/g,'');
+  const ops = ['<=','>=','<','>','='];
+  const op  = ops.find(o=>str.includes(o));
+  if(!op) throw 'Falta operador (<=,>=,<,>,=)';
+  const [L,R] = str.split(op);
+  const exp = `(${math.parse(L)}) - (${math.parse(R)})`;
+  const f   = Function('x','y',`return ${exp}`);
+  const c   = f(0,0), a = f(1,0)-c, b = f(0,1)-c;
+  const test = (x,y)=>{
+    const v=f(x,y);
+    switch(op){
+      case '<=': return v<=1e-9;
+      case '<' : return v<0;
+      case '>=': return v>=-1e-9;
+      case '>' : return v>0;
+      default : return Math.abs(v)<1e-9;
+    }
+  };
+  return {raw:str,op,a,b,c,color:pal.shift()||'#000',test};
+}
+
+/***************************************************
+ *  GRID, REGIÓN, FRONTERAS, VÉRTICES
+ ***************************************************/
+function drawGrid(){
+  ctx.clearRect(0,0,cv.width,cv.height);
+  ctx.lineWidth=1; ctx.strokeStyle='#e5e7eb';
+  for(let x=off.x%scale; x<cv.width; x+=scale){
+    ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,cv.height); ctx.stroke();
+  }
+  for(let y=off.y%scale; y<cv.height; y+=scale){
+    ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(cv.width,y); ctx.stroke();
+  }
+  ctx.strokeStyle='#000';
+  ctx.beginPath();
+  ctx.moveTo(0,off.y);     ctx.lineTo(cv.width,off.y);
+  ctx.moveTo(off.x,0);     ctx.lineTo(off.x,cv.height);
+  ctx.stroke();
+}
+
+function shadeRegion(arr){
+  const img = ctx.getImageData(0,0,cv.width,cv.height);
+  const d   = img.data, step=6;
+  for(let px=0;px<cv.width;px+=step)
+    for(let py=0;py<cv.height;py+=step){
+      const {x,y}=tc(px,py);
+      if(arr.every(o=>o.test(x,y))){
+        for(let dx=0;dx<step;dx++)
+          for(let dy=0;dy<step;dy++){
+            const id=((py+dy)*cv.width+px+dx)*4;
+            d[id]=255; d[id+1]=255; d[id+2]=180; d[id+3]=70;
+          }
+      }
+    }
+  ctx.putImageData(img,0,0);
+}
+
+function drawBorders(arr){
+  arr.forEach(o=>{
+    ctx.strokeStyle=o.color; ctx.lineWidth=2; ctx.beginPath();
+    if(Math.abs(o.b)<1e-9){          // vertical
+      const x0=(-o.c)/o.a, px=tp(x0,0).x;
+      ctx.moveTo(px,0); ctx.lineTo(px,cv.height);
+    }else if(Math.abs(o.a)<1e-9){    // horizontal
+      const y0=(-o.c)/o.b, py=tp(0,y0).y;
+      ctx.moveTo(0,py); ctx.lineTo(cv.width,py);
+    }else{                           // general
+      let first=true;
+      for(let px=0;px<cv.width;px++){
+        const x=tc(px,0).x;
+        const y=(-o.a*x - o.c)/o.b;
+        const py=tp(0,y).y;
+        if(py<0||py>cv.height) continue;
+        if(first){ctx.moveTo(px,py);first=false;} else ctx.lineTo(px,py);
+      }
+    }
+    ctx.stroke();
+  });
+}
+
+function getVertices(arr){
+  const pts=[];
+  for(let i=0;i<arr.length;i++)
+    for(let j=i+1;j<arr.length;j++){
+      const d=arr[i].a*arr[j].b - arr[j].a*arr[i].b;
+      if(Math.abs(d)<1e-9) continue;
+      const x=(arr[i].b*arr[j].c - arr[j].b*arr[i].c)/d;
+      const y=(arr[i].c*arr[j].a - arr[j].c*arr[i].a)/d;
+      if(arr.every(o=>o.test(x,y))) pts.push({x:+x.toFixed(4),y:+y.toFixed(4)});
+    }
+  return pts;
+}
+
+function drawVertices(pts){
+  pts.forEach(p=>{
+    const pix=tp(p.x,p.y);
+    ctx.beginPath(); ctx.arc(pix.x,pix.y,5,0,Math.PI*2);
+    ctx.fillStyle='#ff7e79'; ctx.fill(); ctx.strokeStyle='#000'; ctx.stroke();
+    ctx.font='12px Arial'; ctx.fillStyle='#000';
+    ctx.fillText(`(${p.x},${p.y})`,pix.x+6,pix.y-6);
+  });
+}
+
+/***************************************************
+ *  OBJETIVO EN LOS VÉRTICES
+ ***************************************************/
+function evaluateObjective(pts){
+  const objStr=document.getElementById('obj').value.trim();
+  if(!objStr) return null;
+  let f; try{f=Function('x','y',`return ${objStr}`);}catch{return null;}
+  const sense=document.getElementById('sense').value;
+  let best=pts[0], bestVal=f(best.x,best.y);
+  pts.forEach(p=>{
+    const v=f(p.x,p.y);
+    if((sense==='max' && v>bestVal) || (sense==='min' && v<bestVal)){
+      best=p; bestVal=v;
+    }
+  });
+  return {best,bestVal:+bestVal.toFixed(4),fStr:objStr,sense,f};
+}
+
+/***************************************************
+ *  TEXTOS DE RESULTADOS
+ ***************************************************/
+function textoVertices(pts,info){
+  if(!info||!pts.length) return 'Región factible graficada. Añade Z para evaluar:';
+  let t='Evaluación directa por vértices:\n';
+  pts.forEach(p=>{
+    t+=`Z(${p.x.toFixed(2)}, ${p.y.toFixed(2)}) = ${info.f(p.x,p.y).toFixed(2)}\n`;
+  });
+  return t.trim();
+}
+
+function resumenFinal(best,info,restricciones){
+  if(!best||!info) return '';
+  const rest = restricciones.map((r,i)=>`R${i+1}: ${r.raw}`).join(', ');
+  return `La solución óptima del problema consiste en producir ${best.x.toFixed(2)} unidades de X y ${best.y.toFixed(2)} unidades de Y para ${info.sense==='max'?'maximizar':'minimizar'} la función Z = ${info.fStr}. El valor óptimo es Z = ${info.bestVal.toFixed(2)}. Esta solución cumple con las restricciones: ${rest}.`;
+}
+
+/***************************************************
+ *  FUNCIÓN PRINCIPAL DE GRAFICADO
+ ***************************************************/
+function plot(){
+  try{
+    pal = palette();
+    const parsed=[...document.querySelectorAll('.ineq')]
+                  .map(e=>e.value.trim()).filter(Boolean).map(parse);
+    drawGrid(); shadeRegion(parsed); drawBorders(parsed);
+    const verts=getVertices(parsed); drawVertices(verts);
+
+    const info=evaluateObjective(verts);
+    if(info){
+      const pix=tp(info.best.x,info.best.y);
+      ctx.beginPath(); ctx.arc(pix.x,pix.y,7,0,Math.PI*2);
+      ctx.strokeStyle='#dc2626'; ctx.lineWidth=3; ctx.stroke();
+
+      document.getElementById('result').textContent = `${info.sense==='max'?'Máximo':'Mínimo'} Z = ${info.bestVal} en (${info.best.x},${info.best.y})`;
+      document.getElementById('vertexEval').textContent = textoVertices(verts,info);
+      document.getElementById('summary').textContent   = resumenFinal(info.best,info,parsed);
+    }else{
+      document.getElementById('result').textContent='Introduce Z y vuelve a graficar.';
+      document.getElementById('vertexEval').textContent='';
+      document.getElementById('summary').textContent='';
+    }
+    document.getElementById('analysis').textContent='';
+    document.getElementById('stepsOut').innerHTML='';
+  }catch(e){alert(e);}
+}
+
+/***************************************************
+ *  MÉTODO SIMPLEX (resumen directo)
+ ***************************************************/
+function solveSimplex(){
+  try{
+    pal = palette();
+    const parsed=[...document.querySelectorAll('.ineq')]
+                  .map(e=>e.value.trim()).filter(Boolean).map(parse);
+    const objStr=document.getElementById('obj').value.trim();
+    if(!objStr){alert('Primero introduce la función objetivo Z');return;}
+    const sense=document.getElementById('sense').value;
+    const f=Function('x','y',`return ${objStr}`);
+    const verts=getVertices(parsed);
+    if(!verts.length){alert('No hay región factible');return;}
+
+    let best=verts[0],bestVal=f(best.x,best.y);
+    verts.forEach(p=>{
+      const v=f(p.x,p.y);
+      if((sense==='max'&&v>bestVal)||(sense==='min'&&v<bestVal)){best=p;bestVal=v;}
+    });
+
+    drawGrid(); shadeRegion(parsed); drawBorders(parsed); drawVertices(verts);
+    const optPix=tp(best.x,best.y);
+    ctx.beginPath(); ctx.arc(optPix.x,optPix.y,7,0,Math.PI*2);
+    ctx.strokeStyle='#dc2626'; ctx.lineWidth=3; ctx.stroke();
+
+    document.getElementById('result').textContent=`${sense==='max'?'Máx':'Mín'} Z = ${bestVal.toFixed(2)} en (${best.x}, ${best.y})`;
+    document.getElementById('vertexEval').textContent=textoVertices(verts,{f,sense,best,bestVal});
+
+    // Tabla‑resumen estilo Excel
+    let html='<table style="border-collapse:collapse;font-family:Cambria Math,serif;">'+
+             '<tr style="background:#fbe9e7;font-weight:700;">'+
+             '<td style="border:1px solid #000;padding:4px 8px;"></td>'+
+             '<td style="border:1px solid #000;padding:4px 16px;">X</td>'+
+             '<td style="border:1px solid #000;padding:4px 16px;">Y</td></tr>';
+    html+='<tr style="background:#fbe9e7;font-weight:700;">'+
+           '<td style="border:1px solid #000;padding:4px 8px;">Cantidad</td>'+
+           `<td style="border:1px solid #000;padding:4px 16px;">${best.x}</td>`+
+           `<td style="border:1px solid #000;padding:4px 16px;">${best.y}</td></tr></table><br>`;
+    html+='<div style="font-family:Cambria Math,serif;">';
+    html+=`MaxZ  ${bestVal.toFixed(2)}<br>`;
+    parsed.forEach((c,i)=>{
+      const [lhsStr,rhsStr]=c.raw.split(c.op);
+      const lhsVal=Function('x','y',`return ${lhsStr}`)(best.x,best.y);
+      html+=`EC${i+1}  ${lhsVal.toFixed(2)} ${c.op} ${rhsStr}<br>`;
+    });
+    html+=`X  ${best.x.toFixed(2)} >= 0<br>Y  ${best.y.toFixed(2)} >= 0</div>`;
+
+    document.getElementById('analysis').innerHTML=html;
+    document.getElementById('summary').textContent=resumenFinal(best,{best,bestVal,fStr:objStr,sense},parsed);
+    document.getElementById('stepsOut').innerHTML='';
+  }catch(e){alert(e);}
+}
+
+/***************************************************
+ *  PASO A PASO CON GAUSS‑JORDAN
+ ***************************************************/
+// utilidades del algoritmo paso a paso (tomadas del código base)
+const eps=1e-9;
+const clone=a=>a.map(r=>[...r]);
+function tableHTML(tab,step,desc){
+  const m=tab.length-1;
+  const totalCols=tab[0].length;
+  const n=totalCols-m-2;
+  let html=`<h3>Paso ${step}</h3><div class='step-label'>${desc}</div><table class='simplex'><thead><tr><th></th>`;
+  const headers=['Z'];
+  for(let j=0;j<n;j++) headers.push(`X${j+1}`);
+  for(let j=0;j<m;j++) headers.push(`S${j+1}`);
+  headers.push('R');
+  headers.forEach(h=>html+=`<th>${h}</th>`);
+  html+='</tr></thead><tbody>';
+  const rowLabels=['Z',...Array.from({length:m},(_,i)=>`R${i+1}`)];
+  const rows=[tab[m],...tab.slice(0,m)];
+  rows.forEach((row,i)=>{
+    html+=`<tr><td>${rowLabels[i]}</td>`;
+    row.forEach(v=>html+=`<td>${v.toFixed(2)}</td>`);
+    html+='</tr>';
+  });
+  html+='</tbody></table>';
+  return html;
+}
+function standardize(A,b,ops){
+  const AA=[],bb=[];
+  ops.forEach((op,i)=>{
+    if(op==='<='){AA.push(A[i]);bb.push(b[i]);}
+    else if(op==='>='){AA.push(A[i].map(v=>-v));bb.push(-b[i]);}
+    else {AA.push(A[i]);bb.push(b[i]);AA.push(A[i].map(v=>-v));bb.push(-b[i]);}
+  });
+  return {A:AA,b:bb};
+}
+function buildTableau(c,A,b){
+  const m=A.length,n=A[0].length;
+  const tab=[];
+  for(let i=0;i<m;i++){
+    tab[i]=[0];
+    tab[i].push(...A[i]);
+    for(let j=0;j<m;j++) tab[i].push(i===j?1:0);
+    tab[i].push(b[i]);
+  }
+  const zRow=[1];
+  for(let j=0;j<n;j++) zRow.push(-c[j]);
+  for(let j=0;j<m;j++) zRow.push(0);
+  zRow.push(0);
+  tab.push(zRow);
+  return tab;
+}
+function simplexSteps(tab){
+  const m=tab.length-1;
+  const totalCols=tab[0].length;
+  const n=totalCols-m-2;
+  const steps=[[clone(tab),'Tableau inicial']];
+  while(true){
+    const z=tab[m];
+    let pc=z.slice(1,1+n).reduce((idx,v,i,a)=>v<a[idx]?i:idx,0)+1;
+    if(z[pc]>=-eps)break;
+    let pr=-1,min=1e20;
+    for(let i=0;i<m;i++){
+      const a=tab[i][pc];
+      if(a>eps){const r=tab[i][totalCols-1]/a;if(r<min){min=r;pr=i;}}
+    }
+    if(pr==-1)throw 'Solución no acotada';
+    const piv=tab[pr][pc];
+    for(let j=0;j<totalCols;j++) tab[pr][j]/=piv;
+    steps.push([clone(tab),`Dividir fila R${pr+1} entre ${piv.toFixed(2)}`]);
+    for(let i=0;i<=m;i++) if(i!==pr){
+      const f=tab[i][pc];
+      if(Math.abs(f)>eps){
+        for(let j=0;j<totalCols;j++) tab[i][j]-=f*tab[pr][j];
+        const filaNombre=i===m?'Z':`R${i+1}`;
+        steps.push([clone(tab),`Fila ${filaNombre} ← ${filaNombre} − (${f.toFixed(2)}) × fila R${pr+1}`]);
+      }
+    }
+  }
+  steps.push([clone(tab),'Tableau óptimo']);
+  return steps;
+}
+
+function showSimplexSteps(){
+  try{
+    /* 1. Generar matrices A, b y ops a partir de las desigualdades ----------------*/
+    const parsed=[...document.querySelectorAll('.ineq')]
+                  .map(e=>e.value.trim()).filter(Boolean).map(parse);
+    if(!parsed.length){alert('Introduce al menos una restricción');return;}
+    const A=[],b=[],ops=[];
+    parsed.forEach(p=>{
+      A.push([p.a,p.b]);
+      b.push(-p.c);
+      let o=p.op;
+      if(o==='<') o='<='];
+      if(o==='>') o='>=';
+      ops.push(o);
+    });
+    /* 2. Obtener coeficientes de la función objetivo ------------------------------*/
+    const objStr=document.getElementById('obj').value.trim();
+    if(!objStr){alert('Primero introduce la función objetivo Z');return;}
+    const f=Function('x','y',`return ${objStr}`);
+    const c0=f(0,0), c1=f(1,0)-c0, c2=f(0,1)-c0;
+    const c=[c1,c2];
+
+    const sense=document.getElementById('sense').value;
+    const cAdj=sense==='min'?c.map(v=>-v):c;
+
+    /* 3. Construir tableau y ejecutar pasos ---------------------------------------*/
+    const std=standardize(A,b,ops);
+    const tab=buildTableau(cAdj,std.A,std.b);
+    let html='';
+    try{
+      const steps=simplexSteps(tab);
+      steps.forEach(([t,desc],i)=>html+=tableHTML(t,i,desc)+'<br>');
+    }catch(e){html='<b>Error:</b> '+e;}
+
+    /* 4. Mostrar en #stepsOut ------------------------------------------------------*/
+    document.getElementById('stepsOut').innerHTML=html;
+    // limpiar otros paneles para no mezclar
+    document.getElementById('analysis').innerHTML='';
+  }catch(e){alert(e);}
+}
+
+/***************************************************
+ *  ZOOM Y MOVIMIENTO
+ ***************************************************/
+document.getElementById('zin').onclick = ()=>{scale=Math.min(scale+10,200);plot();};
 document.getElementById('zout').onclick=()=>{scale=Math.max(scale-10,1);plot();};
-document.querySelectorAll('[data-d]').forEach(b=>b.onclick=()=>{const s=20;switch(b.dataset.d){case'up':off.y+=s;break;case'down':off.y-=s;break;case'left':off.x+=s;break;case'right':off.x-=s;break;default:off={x:cv.width/2,y:cv.height/2};}plot();});
-/* ---------- primera vista ---------- */
+
+document.querySelectorAll('[data-d]').forEach(btn=>btn.onclick=()=>{
+  const s=20;
+  switch(btn.dataset.d){
+    case 'up'   : off.y+=s;break;
+    case 'down' : off.y-=s;break;
+    case 'left' : off.x+=s;break;
+    case 'right': off.x-=s;break;
+    default     : off={x:cv.width/2,y:cv.height/2};
+  }
+  plot();
+});
+
+/***************************************************
+ *  ENLACE DE BOTONES PRINCIPALES
+ ***************************************************/
+document.getElementById('draw' ).onclick=plot;
+document.getElementById('solve').onclick=solveSimplex;
+document.getElementById('steps').onclick=showSimplexSteps;
+
+/***************************************************
+ *  PRIMERA RENDERIZACIÓN
+ ***************************************************/
 plot();
 </script>
 </body>
